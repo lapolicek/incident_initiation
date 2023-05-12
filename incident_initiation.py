@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 
-# File name: incident_initiation.py
+# File name: Incident_Initiation.py
 # Author: Kyle LaPolice
 # Date created: 1 - Jul - 2022
-# Date last modified: 16 - Aug - 2022
-# Script Version: 1.0
+# Date last modified: 20 - Jan - 2022
+# Script Version: 1.3
 
 from pathlib import Path
+from typing import Any
 
 import PySimpleGUI as sg # pip install PySimpleGUI
 import pandas as pd # pip install pandas openpyxL
@@ -16,15 +17,22 @@ from docxtpl import DocxTemplate # pip install docxtpl
 import warnings
 warnings.filterwarnings('ignore', category=UserWarning, module='openpyxl')
 
-window_name = 'Incident Initiation' # Change name of window per project
+# Change name of window per project
+window_name = 'Incident Initiation'
 
 # Layout of window
 layout = [
     [sg.Text("Select Incident Log File:")],
-    [sg.Input(key='EXCEL', enable_events = True), sg.FileBrowse(key = 'eBROWSE')],
+    [sg.Input(key = 'EXCEL', enable_events = True), sg.FileBrowse(key = 'eBROWSE')],
 
-    [sg.Text("Select Incidents to Initiate:")],
-    [sg.Listbox(values=[], key = 'LISTBOX', size = (0,10), expand_x = True, select_mode = sg.LISTBOX_SELECT_MODE_MULTIPLE)],
+    [sg.Text("Select Incidents to Initiate: (Hold CTRL to select multiple rows)")],
+    [sg.Table(values = [],
+              headings = ['Incident #', 'Event Date', 'Equipment #', '     EQ Description     ', 'Assigned to?'],
+              key = 'TABLE',
+              expand_x = True,
+              justification = 'left',
+              enable_events = True,
+              select_mode=sg.TABLE_SELECT_MODE_EXTENDED)],
 
     [sg.Text("Enter Name:")],
     [sg.Input(key='NAME', enable_events = True, default_text = "")],
@@ -43,52 +51,52 @@ while True:
     if event == 'Exit' or event == sg.WIN_CLOSED:
         break
 
-    # updates Listbox with Excel sheets
+    # updates table with Excel sheet
     if event == 'EXCEL':
-        # create dataframe with just incident num colum and event date
-        e_sheets = pd.read_excel(values.get('EXCEL'), sheet_name="Equipment Incident Log", usecols=['Equipment Incident #','Event Date'])
+        # create dataframe with incident num colum, event date, eq num, eq desc, assigned
+        e_sheets = pd.read_excel(values.get('EXCEL'), sheet_name = "Equipment Incident Log")
 
-        # drop the empty rows, remove event date column, reverse the order
-        e_dropna = e_sheets.dropna()
-        e_nums = e_dropna.drop(columns = 'Event Date')
-        e_reverse = e_nums.iloc[::-1]
+        e_dropna = e_sheets.dropna(subset=['Event Date'])   # drop the rows with empty cells under Event Date
+        e_dropna['Event Date'] = e_dropna['Event Date'].dt.strftime('%d-%b-%Y') # reformat event date column to dd/mmm/yyyy
+        e_reverse = e_dropna.iloc[::-1] # reverse the order
+        e_index = e_reverse.reset_index(drop=True) # resets the index to new pruned and reversed dataframe
 
-        # convert dataframe to list and send to listbox
-        window['LISTBOX'].update(values = list(e_reverse.values.tolist()))
+        # create dataframe with columns used in table
+        table_values = e_index[['Equipment Incident #','Event Date', 'EQ #', 'EQ Description', 'Assigned to?']]
+
+        # convert dataframe to list and send to table
+        window['TABLE'].update(values = list(table_values.values.tolist()))
         continue
 
     # executes program
     if event =='GO':
 
-        # gets data from excel sheet chosen from Listbox
-        e_sheets = pd.read_excel(values.get('EXCEL'), sheet_name = 'Equipment Incident Log')
-        keep_list = values.get('LISTBOX')
-
-        # converts from list of lists to just a list
+        # converts from selected table row to specific eq incident num and adds to list
+        keep_list = values.get('TABLE')
         joined_list = []
-        for items in values.get('LISTBOX'):
-            joined_list.append(items[0])
+        for items in values.get('TABLE'):
+            row = e_index['Equipment Incident #'][items]
+            joined_list.append(row)
 
-        # only selects rows that were selected in the listbox
-        cleaned = e_sheets[e_sheets['Equipment Incident #'].isin(joined_list)]
+        # creates dataframe from rows that were selected in the TABLE
+        cleaned = e_index[e_index['Equipment Incident #'].isin(joined_list)]
 
-        #add user name input
-        cleaned = cleaned.assign(Name=values.get('NAME'))
-        # cleaned.loc[:,'Name'] = values.get('NAME')
-        # cleaned['Name'] = values.get('NAME')
+        #add user name input to dataframe
+        cleaned = cleaned.assign(Name = values.get('NAME'))
         print(cleaned)
 
         # removes from the column headers "spaces" and "#", and then removes "/" from the entire dataframe
         cleaned.columns = cleaned.columns.str.replace(' ','_')
         cleaned.columns = cleaned.columns.str.replace('#','')
-        cleaned = cleaned.replace("/","", regex=True)
 
-        # converts date format
-        cleaned['Event_Date'] = cleaned['Event_Date'].dt.strftime('%d-%b-%Y')
+        # removes "/" and """ from the entire dataframe
+        cleaned = cleaned.replace("/","", regex=True)
+        cleaned = cleaned.replace("\"","", regex=True)
+        cleaned = cleaned.replace("\t","", regex=True)
 
         # sets directories
         base_dir =  Path(__file__).parent
-        template_path = base_dir / '_Template' / 'FRM-1297_B Incident Form.docx'
+        template_path = base_dir / '_Template' / 'FRM-1297_C Incident Form.docx'
 
         # itterates over template to create word docs from templates
         for record in cleaned.to_dict(orient="records"):
@@ -101,7 +109,7 @@ while True:
             # checks if file already exists, if it does not exist creates the folder and saves the docx in it
             if not output_dir.is_dir():
                 output_dir.mkdir(exist_ok=True)
-                output_path = output_dir / 'FRM-1297_B Incident Form.docx'
+                output_path = output_dir / 'FRM-1297_C Incident Form.docx'
                 doc.save(output_path)
         continue
 
